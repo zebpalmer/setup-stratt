@@ -1,0 +1,58 @@
+name: Setup stratt
+description: Download, verify, and install the stratt task runner.
+author: zebpalmer
+
+branding:
+  icon: terminal
+  color: blue
+
+inputs:
+  version:
+    description: >
+      stratt version to install (e.g. '0.4.0'). Omit or pass 'latest'
+      to resolve the current release automatically.
+    default: latest
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve version
+      id: ver
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          V=$(gh release view --repo zebpalmer/stratt --json tagName -q .tagName | sed 's/^v//')
+        else
+          V="${{ inputs.version }}"
+        fi
+        echo "version=$V" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Download, verify, and install stratt
+      shell: bash
+      run: |
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        V="${{ steps.ver.outputs.version }}"
+        ARCHIVE="stratt_${V}_${OS}_${ARCH}.tar.gz"
+        BASE="https://github.com/zebpalmer/stratt/releases/download/v${V}"
+
+        curl -fsSL "${BASE}/${ARCHIVE}"     -o "/tmp/${ARCHIVE}"
+        curl -fsSL "${BASE}/checksums.txt"  -o "/tmp/stratt_checksums.txt"
+
+        # Verify checksum (GoReleaser-published checksums.txt)
+        cd /tmp && grep "${ARCHIVE}" stratt_checksums.txt | sha256sum -c -
+
+        # Verify GitHub artifact attestation (proves the binary was built
+        # by zebpalmer/stratt's release workflow, not just hash-matched)
+        gh attestation verify "/tmp/${ARCHIVE}" --repo zebpalmer/stratt
+
+        # Extract and install to user PATH
+        tar -xzf "/tmp/${ARCHIVE}" -C /tmp stratt
+        mkdir -p "$HOME/.local/bin"
+        install -m 0755 /tmp/stratt "$HOME/.local/bin/stratt"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      env:
+        GH_TOKEN: ${{ github.token }}
