@@ -1,51 +1,80 @@
 # setup-stratt
 
-GitHub Action that installs [stratt](https://github.com/zebpalmer/stratt) in a workflow runner.
+GitHub Action that installs [stratt](https://github.com/zebpalmer/stratt) in a workflow runner. Verifies the downloaded archive's checksum *and* its GitHub artifact attestation before executing anything.
 
 ## Usage
 
-Pin to a commit SHA (recommended — tags are mutable, SHAs are not):
+### Recommended: pin the action major
 
 ```yaml
-- uses: zebpalmer/setup-stratt@<sha>  # x.y.z
+permissions:
+  contents: read
+  attestations: read   # required for `gh attestation verify`
 
-- run: stratt test
+steps:
+  - uses: zebpalmer/setup-stratt@v0
+  - run: stratt all
 ```
 
-Find the SHA for the latest release on the [releases page](https://github.com/zebpalmer/setup-stratt/releases) or via:
+`@v0` is a floating tag that fast-forwards on each non-breaking action release. You get bug fixes for free; you won't get a breaking action change without explicitly bumping to `@v1`.
 
-```sh
-gh release view --repo zebpalmer/setup-stratt --json targetCommitish -q .targetCommitish
-```
+By default, the action installs the latest stratt CLI release within the action's own major — so `@v0` installs the latest `stratt v0.x.y`. When stratt cuts `1.0.0`, a parallel `setup-stratt@v1` ships with `version: v1` as its default.
 
-[Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot) and [Renovate](https://docs.renovatebot.com/) can both update SHA pins automatically.
+### Pin the action by SHA (highest security)
 
-Pin to a specific stratt version:
+Tags are mutable; commit SHAs aren't. For high-security pipelines, pin the action to a SHA and let Dependabot or Renovate update it:
 
 ```yaml
-- uses: zebpalmer/setup-stratt@<sha>  # x.y.z
+- uses: zebpalmer/setup-stratt@<sha>  # v0.3.0
+```
+
+Find the SHA via `gh release view --repo zebpalmer/setup-stratt --json targetCommitish -q .targetCommitish`.
+
+### Override the stratt CLI version
+
+```yaml
+- uses: zebpalmer/setup-stratt@v0
   with:
-    version: '0.4.0'
+    version: v0.5.1        # exact pin (fully reproducible builds)
+    # version: v0.5        # latest v0.5.x
+    # version: v0          # latest v0.x.y (default behavior)
+    # version: latest      # latest stable across any major
 ```
 
 ## Inputs
 
 | Input | Default | Description |
 |---|---|---|
-| `version` | `latest` | stratt version to install. Omit or pass `latest` to resolve the current release. |
+| `version` | `v0` | stratt version selector. Accepts `vN` (major), `vN.M` (minor), `vN.M.P` (exact), or `latest`. |
+| `require-attestation` | `true` | When `true`, fails the job if `gh attestation verify` doesn't pass. Set to `false` only if your org forbids granting `attestations: read`. |
 
-## Security
+## Required permissions
 
-Every installation is verified at two layers:
+The attestation check fetches the Sigstore bundle from GitHub's attestations API. The calling job must grant:
 
-1. **Checksum** — the downloaded archive is checked against the GoReleaser-published `checksums.txt` for the release.
-2. **GitHub artifact attestation** — `gh attestation verify` confirms the archive was produced by the `zebpalmer/stratt` release workflow, not just hash-matched. A compromised CDN or stolen release token cannot produce an archive that passes this check.
+```yaml
+permissions:
+  attestations: read
+```
 
-Pinning to a commit SHA (the recommended usage above) ensures the action code itself is immutable — the two-layer binary verification plus an immutable action reference gives you a fully auditable chain from source to running binary.
+`id-token: write` is **not** needed — verification is read-only on GitHub's side; the Sigstore signature check happens locally against the public-good trust root.
+
+If your org policy forbids granting `attestations: read`, set `require-attestation: false`. Checksum verification still runs unconditionally.
+
+## Security model
+
+Each install runs two independent checks before stratt is ever executed:
+
+1. **Checksum** — the downloaded archive is verified against the GoReleaser-published `checksums.txt` for the release.
+2. **GitHub artifact attestation** — `gh attestation verify` confirms the archive was built by `zebpalmer/stratt`'s release workflow. A compromised CDN, a stolen release token, or a typosquatted release in another repo cannot produce an archive that passes this check.
+
+The verification is run by `gh` (a trusted, independent binary on the runner) *before* the stratt binary is exec'd, so a tampered binary cannot fake its own verification.
+
+For an even tighter chain, pin the action to a SHA (above) so the installer code itself is immutable.
 
 ## Requirements
 
-The `gh` CLI must be available on the runner. It is pre-installed on all GitHub-hosted runners (`ubuntu-*`, `macos-*`, `windows-*`). Self-hosted runners must install it separately.
+The `gh` CLI must be on the runner. It's pre-installed on all GitHub-hosted runners (`ubuntu-*`, `macos-*`, `windows-*`). Self-hosted runners must install it separately.
 
 ## License
 

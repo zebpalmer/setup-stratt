@@ -1,0 +1,43 @@
+# Fast-forwards the floating major tag (e.g. v0, v1) to the commit
+# tagged by a new release.  Users pinning `setup-stratt@v0` get the
+# new release automatically; users pinning a SHA or full semver tag
+# are unaffected.
+#
+# Security note: github.event.release.tag_name is treated as untrusted
+# input and validated against a strict vN.M.P regex before being passed
+# to git.  This blocks tag-name injection (e.g. a release tagged
+# `v1.0.0; rm -rf /`) from reaching the shell.
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-major-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Move major tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "skipping: $RELEASE_TAG is not a clean vN.M.P release"
+            exit 0
+          fi
+          MAJOR="v${BASH_REMATCH[1]}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -f "$MAJOR" "$RELEASE_TAG"
+          git push --force origin "refs/tags/$MAJOR"
+          echo "moved $MAJOR -> $RELEASE_TAG"

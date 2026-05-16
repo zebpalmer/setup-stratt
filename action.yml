@@ -9,50 +9,104 @@ branding:
 inputs:
   version:
     description: >
-      stratt version to install (e.g. '0.4.0'). Omit or pass 'latest'
-      to resolve the current release automatically.
-    default: latest
+      stratt version selector.  Accepted forms:
+        v0          → latest v0.x.y (the action's major pin; default)
+        v0.5        → latest v0.5.x
+        v0.5.1      → exact pin
+        latest      → latest stable release across any major
+      Default tracks the action's own major so `@v0` users get fixes
+      automatically but never a stratt major bump.
+    default: v0
+    required: false
+  require-attestation:
+    description: >
+      When 'true' (default), the install fails if `gh attestation verify`
+      doesn't pass.  Requires the workflow to grant `attestations: read`.
+      Set to 'false' to soft-skip when your org forbids granting that
+      permission — checksum verification still runs.
+    default: 'true'
     required: false
 
 runs:
   using: composite
   steps:
-    - name: Resolve version
+    - name: Resolve stratt version
       id: ver
       shell: bash
-      run: |
-        if [ "${{ inputs.version }}" = "latest" ]; then
-          V=$(gh release view --repo zebpalmer/stratt --json tagName -q .tagName | sed 's/^v//')
-        else
-          V="${{ inputs.version }}"
-        fi
-        echo "version=$V" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ github.token }}
+        SELECTOR: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$SELECTOR" in
+          latest|"")
+            tag=$(gh release view --repo zebpalmer/stratt --json tagName -q .tagName)
+            ;;
+          v*.*.*|[0-9]*.*.*)
+            case "$SELECTOR" in
+              v*) tag="$SELECTOR" ;;
+              *)  tag="v$SELECTOR" ;;
+            esac
+            ;;
+          *)
+            # Major (vN) or minor (vN.M) selector — list releases and
+            # pick the highest matching tag.  Excludes prereleases.
+            prefix="${SELECTOR#v}"
+            tag=$(gh release list --repo zebpalmer/stratt --limit 100 --exclude-drafts --exclude-pre-releases \
+                  --json tagName -q '.[].tagName' \
+                | grep -E "^v?${prefix}\.[0-9]+(\.[0-9]+)?$" \
+                | sed 's/^v//' \
+                | sort -t. -k1,1n -k2,2n -k3,3n \
+                | tail -n1 \
+                | sed 's/^/v/' || true)
+            if [ -z "$tag" ]; then
+              echo "no stratt release matches selector: $SELECTOR" >&2
+              exit 1
+            fi
+            ;;
+        esac
+        version="${tag#v}"
+        echo "tag=$tag"          >> "$GITHUB_OUTPUT"
+        echo "version=$version"  >> "$GITHUB_OUTPUT"
+        echo "Resolved $SELECTOR → $tag"
 
     - name: Download, verify, and install stratt
       shell: bash
-      run: |
-        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        V="${{ steps.ver.outputs.version }}"
-        ARCHIVE="stratt_${V}_${OS}_${ARCH}.tar.gz"
-        BASE="https://github.com/zebpalmer/stratt/releases/download/v${V}"
-
-        curl -fsSL "${BASE}/${ARCHIVE}"     -o "/tmp/${ARCHIVE}"
-        curl -fsSL "${BASE}/checksums.txt"  -o "/tmp/stratt_checksums.txt"
-
-        # Verify checksum (GoReleaser-published checksums.txt)
-        cd /tmp && grep "${ARCHIVE}" stratt_checksums.txt | sha256sum -c -
-
-        # Verify GitHub artifact attestation (proves the binary was built
-        # by zebpalmer/stratt's release workflow, not just hash-matched)
-        gh attestation verify "/tmp/${ARCHIVE}" --repo zebpalmer/stratt
-
-        # Extract and install to user PATH
-        tar -xzf "/tmp/${ARCHIVE}" -C /tmp stratt
-        mkdir -p "$HOME/.local/bin"
-        install -m 0755 /tmp/stratt "$HOME/.local/bin/stratt"
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       env:
         GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.ver.outputs.tag }}
+        VERSION: ${{ steps.ver.outputs.version }}
+        REQUIRE_ATTESTATION: ${{ inputs.require-attestation }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        archive="stratt_${VERSION}_${os}_${arch}.tar.gz"
+        base="https://github.com/zebpalmer/stratt/releases/download/${TAG}"
+
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
+
+        curl -fsSL "${base}/${archive}"     -o "${tmp}/${archive}"
+        curl -fsSL "${base}/checksums.txt"  -o "${tmp}/checksums.txt"
+
+        # 1. Checksum (GoReleaser-published checksums.txt).
+        (cd "$tmp" && grep " ${archive}\$" checksums.txt | sha256sum -c -)
+
+        # 2. GitHub artifact attestation.  Proves the binary was built
+        # by zebpalmer/stratt's release workflow, not just hash-matched.
+        # Requires `attestations: read` permission on the calling job.
+        if [ "$REQUIRE_ATTESTATION" = "true" ]; then
+          gh attestation verify "${tmp}/${archive}" --repo zebpalmer/stratt
+        else
+          if ! gh attestation verify "${tmp}/${archive}" --repo zebpalmer/stratt 2>/dev/null; then
+            echo "::warning::attestation verification skipped (require-attestation=false)"
+          fi
+        fi
+
+        tar -xzf "${tmp}/${archive}" -C "$tmp" stratt
+        mkdir -p "$HOME/.local/bin"
+        install -m 0755 "${tmp}/stratt" "$HOME/.local/bin/stratt"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+        echo "✓ installed stratt $TAG"
