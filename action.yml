@@ -40,7 +40,7 @@ runs:
         set -euo pipefail
         case "$SELECTOR" in
           latest|"")
-            tag=$(gh release view --repo zebpalmer/stratt --json tagName -q .tagName)
+            tag=$(gh release view --repo stratt-sh/stratt --json tagName -q .tagName)
             ;;
           v*.*.*|[0-9]*.*.*)
             case "$SELECTOR" in
@@ -52,7 +52,7 @@ runs:
             # Major (vN) or minor (vN.M) selector — list releases and
             # pick the highest matching tag.  Excludes prereleases.
             prefix="${SELECTOR#v}"
-            tag=$(gh release list --repo zebpalmer/stratt --limit 100 --exclude-drafts --exclude-pre-releases \
+            tag=$(gh release list --repo stratt-sh/stratt --limit 100 --exclude-drafts --exclude-pre-releases \
                   --json tagName -q '.[].tagName' \
                 | grep -E "^v?${prefix}\.[0-9]+(\.[0-9]+)?$" \
                 | sed 's/^v//' \
@@ -82,7 +82,7 @@ runs:
         os=$(uname -s | tr '[:upper:]' '[:lower:]')
         arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
         archive="stratt_${VERSION}_${os}_${arch}.tar.gz"
-        base="https://github.com/zebpalmer/stratt/releases/download/${TAG}"
+        base="https://github.com/stratt-sh/stratt/releases/download/${TAG}"
 
         tmp=$(mktemp -d)
         trap 'rm -rf "$tmp"' EXIT
@@ -94,12 +94,12 @@ runs:
         (cd "$tmp" && grep " ${archive}\$" checksums.txt | sha256sum -c -)
 
         # 2. GitHub artifact attestation.  Proves the binary was built
-        # by zebpalmer/stratt's release workflow, not just hash-matched.
+        # by stratt-sh/stratt's release workflow, not just hash-matched.
         # Requires `attestations: read` permission on the calling job.
         if [ "$REQUIRE_ATTESTATION" = "true" ]; then
-          gh attestation verify "${tmp}/${archive}" --repo zebpalmer/stratt
+          gh attestation verify "${tmp}/${archive}" --repo stratt-sh/stratt
         else
-          if ! gh attestation verify "${tmp}/${archive}" --repo zebpalmer/stratt 2>/dev/null; then
+          if ! gh attestation verify "${tmp}/${archive}" --repo stratt-sh/stratt 2>/dev/null; then
             echo "::warning::attestation verification skipped (require-attestation=false)"
           fi
         fi

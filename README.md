@@ -1,6 +1,6 @@
 # setup-stratt
 
-GitHub Action that installs [stratt](https://github.com/zebpalmer/stratt) in a workflow runner. Verifies the downloaded archive's checksum *and* its GitHub artifact attestation before executing anything.
+GitHub Action that installs [stratt](https://github.com/stratt-sh/stratt) in a workflow runner. Verifies the downloaded archive's checksum *and* its GitHub artifact attestation before executing anything.
 
 ## Usage
 
@@ -12,7 +12,7 @@ permissions:
   attestations: read   # required for `gh attestation verify`
 
 steps:
-  - uses: zebpalmer/setup-stratt@v0
+  - uses: stratt-sh/setup-stratt@v0
   - run: stratt all
 ```
 
@@ -25,15 +25,15 @@ By default, the action installs the latest stratt CLI release within the action'
 Tags are mutable; commit SHAs aren't. For high-security pipelines, pin the action to a SHA and let Dependabot or Renovate update it:
 
 ```yaml
-- uses: zebpalmer/setup-stratt@<sha>  # v0.3.0
+- uses: stratt-sh/setup-stratt@<sha>  # v0.3.0
 ```
 
-Find the SHA via `gh release view --repo zebpalmer/setup-stratt --json targetCommitish -q .targetCommitish`.
+Find the SHA via `gh release view --repo stratt-sh/setup-stratt --json targetCommitish -q .targetCommitish`.
 
 ### Override the stratt CLI version
 
 ```yaml
-- uses: zebpalmer/setup-stratt@v0
+- uses: stratt-sh/setup-stratt@v0
   with:
     version: v0.5.1        # exact pin (fully reproducible builds)
     # version: v0.5        # latest v0.5.x
@@ -66,7 +66,7 @@ If your org policy forbids granting `attestations: read`, set `require-attestati
 Each install runs two independent checks before stratt is ever executed:
 
 1. **Checksum** — the downloaded archive is verified against the GoReleaser-published `checksums.txt` for the release.
-2. **GitHub artifact attestation** — `gh attestation verify` confirms the archive was built by `zebpalmer/stratt`'s release workflow. A compromised CDN, a stolen release token, or a typosquatted release in another repo cannot produce an archive that passes this check.
+2. **GitHub artifact attestation** — `gh attestation verify` confirms the archive was built by `stratt-sh/stratt`'s release workflow. A compromised CDN, a stolen release token, or a typosquatted release in another repo cannot produce an archive that passes this check.
 
 The verification is run by `gh` (a trusted, independent binary on the runner) *before* the stratt binary is exec'd, so a tampered binary cannot fake its own verification.
 
